@@ -7,4 +7,4 @@ Requirement
 Usage
  > gcc/clang sldae-dev-tool.c -lm -lgsl -lgslcblas
 
-[![Generic badge](https://img.shields.io/badge/<SUBJECT>-<STATUS>-<COLOR>.svg)](https://shields.io/)
+[![C/C++](https://img.shields.io/badge/download-C%2FC%2B%2B-blue.svg)](https://github.com/AntoineBoulet/sldae-dev-tool/)
