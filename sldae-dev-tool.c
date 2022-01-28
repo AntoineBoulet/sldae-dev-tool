@@ -69,7 +69,7 @@
      dp = (\partial / \partial y_x)^n
           [derivative of coefficients appearing in b and c function expansions]
      id [2] = {FUNCTIONAL_ID, PAIRING_ID} := {fid, pid}
-          [for general purpose]
+          [for general purpose, enventually add mid to select effective mass]
 
   2/ functions
      f(int dk, double x, int id[]) = \partial_k f_id(x)
@@ -163,6 +163,14 @@ double xm (int, double, int *);
 double product_lrule (int, double, int, int, int *, int *,
                       double (*) (int, double, int *),
                       double (*) (int, double, int *));
+// interpolation of parameters (cf. gsl_multiroots)
+void print_sldae_parameters (double, int *);
+void print_interpolation_parameters (gsl_multiroot_fsolver *);
+int beta_fit (const gsl_vector *, void *, gsl_vector *);
+int inverse_gamma_fit (const gsl_vector *, void *, gsl_vector *);
+int b_functional_fit (const gsl_vector *, void *, gsl_vector *);
+int c_functional_fit (const gsl_vector *, void *, gsl_vector *);
+struct rparams {double *X; double *F; double F_UFG;};
 // APS[x,y,z] functional related
 double s_aps (int, double, int *);
 double s_aps_2d1 (int, double, int *);
@@ -261,6 +269,131 @@ pairing_gap (int dn, double _x, int id [])
 
 
 
+// ---------------------------------------------------------------------------
+
+
+
+// ###########################################################################
+// ---------------------------------------------------------------------------
+// main interpolation (padé[4/4]) routine of sldae functional
+// ---------------------------------------------------------------------------
+int main() {
+    
+    int id[2] = {0,0}; // choose sldae functional
+     double _x = 1.000;
+     print_sldae_parameters (_x, id); // print sldae parameters at _x
+    
+    printf(" ###########################################\n");
+    printf("          --   SLDAE DEV TOOL   --          \n");
+    printf(" ###########################################\n\n");
+    printf(" padé[4/4] interpolation of sldae parameters\n");
+    printf(" p = {beta, inverse_gamma, B, C} [x = |akF|]\n\n");
+    printf("    p       a1 x + a2 x^2 + a3 x^3 + c x^4  \n");
+    printf("  ----- = ----------------------------------\n");
+    printf("  p_ufg   1 + b1 x + b2 x^2 + b3 x^3 + c x^4\n\n");
+
+
+    // initialization of interpolation routine
+    const gsl_multiroot_fsolver_type *T = gsl_multiroot_fsolver_hybrids;
+    gsl_multiroot_fsolver *s = gsl_multiroot_fsolver_alloc (T, 7);
+    
+    // interpolation points (7 requiered)
+    double X[7] = {0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0};
+    double F_beta[7] = {
+        beta_parameter(0, X[0], id),
+        beta_parameter(0, X[1], id),
+        beta_parameter(0, X[2], id),
+        beta_parameter(0, X[3], id),
+        beta_parameter(0, X[4], id),
+        beta_parameter(0, X[5], id),
+        beta_parameter(0, X[6], id)
+    };
+    double F_inverse_gamma[7] = {
+        inverse_gamma_parameter(0, X[0], id),
+        inverse_gamma_parameter(0, X[1], id),
+        inverse_gamma_parameter(0, X[2], id),
+        inverse_gamma_parameter(0, X[3], id),
+        inverse_gamma_parameter(0, X[4], id),
+        inverse_gamma_parameter(0, X[5], id),
+        inverse_gamma_parameter(0, X[6], id)
+    };
+    double F_bf[7] = {
+        b_functional(X[0], id),
+        b_functional(X[1], id),
+        b_functional(X[2], id),
+        b_functional(X[3], id),
+        b_functional(X[4], id),
+        b_functional(X[5], id),
+        b_functional(X[6], id)
+    };
+    double F_cf[7] = {
+        c_functional(X[0], id),
+        c_functional(X[1], id),
+        c_functional(X[2], id),
+        c_functional(X[3], id),
+        c_functional(X[4], id),
+        c_functional(X[5], id),
+        c_functional(X[6], id)
+    };
+    double beta_ufg = beta_parameter(0, 1e9, id);
+    double inverse_gamma_ufg = inverse_gamma_parameter(0, 1e9, id);
+    double bf_ufg = b_functional(1e9, id);
+    double cf_ufg = c_functional(1e9, id);
+    struct rparams p_beta = {X, F_beta, beta_ufg};
+    struct rparams p_inverse_gamma = {X, F_inverse_gamma, inverse_gamma_ufg};
+    struct rparams p_bf = {X, F_bf, bf_ufg};
+    struct rparams p_cf = {X, F_cf, cf_ufg};
+
+    // initialization of the solution
+    gsl_vector *x = gsl_vector_alloc (7);
+    gsl_vector_set (x, 0, 1);
+    gsl_vector_set (x, 1, 1);
+    gsl_vector_set (x, 2, 1);
+    gsl_vector_set (x, 3, 1);
+    gsl_vector_set (x, 4, 1);
+    gsl_vector_set (x, 5, 1);
+    gsl_vector_set (x, 6, 1);
+        
+    // interpolation of beta_parameters
+    gsl_multiroot_function beta = {&beta_fit, 7, &p_beta};
+    gsl_multiroot_fsolver_set (s, &beta, x);
+    printf("                    * * *                   \n");
+    printf ("\n beta interpolation\n beta_ufg = %+lf\n", beta_ufg);
+    print_interpolation_parameters (s);
+    
+    // interpolation of b_functional
+    gsl_multiroot_function bf = {&b_functional_fit, 7, &p_bf};
+    gsl_multiroot_fsolver_set (s, &bf, x);
+    printf("                    * * *                   \n");
+    printf ("\n b_functional interpolation\n b_functional_ufg = %+lf\n", bf_ufg);
+    print_interpolation_parameters (s);
+
+    // interpolation of inverse_gamma_parameters
+    gsl_multiroot_function inverse_gamma = {&inverse_gamma_fit, 7, &p_inverse_gamma};
+    gsl_multiroot_fsolver_set (s, &inverse_gamma, x);
+    printf("                    * * *                   \n");
+    printf ("\n inverse_gamma interpolation\n inverse_gamma_ufg = %+lf\n", inverse_gamma_ufg);
+    print_interpolation_parameters (s);
+
+    // interpolation of c_functional
+    gsl_multiroot_function cf = {&c_functional_fit, 7, &p_cf};
+    gsl_multiroot_fsolver_set (s, &cf, x);
+    printf("                    * * *                   \n");
+    printf ("\n c_functional interpolation\n c_functional_ufg = %+lf\n", cf_ufg);
+    print_interpolation_parameters (s);
+        
+    // reset memory of solver
+    gsl_multiroot_fsolver_free (s);
+    gsl_vector_free (x);
+    printf(" ###########################################\n");
+
+  return 0;
+}
+// ---------------------------------------------------------------------------
+// ###########################################################################
+
+
+
 
 // ---------------------------------------------------------------------------
 
@@ -321,6 +454,19 @@ double
 binomial_coefficient (int in, int ik)
 {
   return tgamma (in + 1.) / tgamma (ik + 1.) / tgamma (in - ik + 1.);
+}
+
+// generalized binomial coefficients
+// =================================
+// C_{a,p} = \prod_{j=1}^k ((a+1)/j - 1)
+double
+generalized_binomial_coefficient (double a, int ik)
+{
+    double r_ = 1.; int ij;
+    for (ij = 1; ij < ik + 1; ij++) {
+        r_ *= (a + 1.)/ ((double)ij) - 1.;
+    }
+    return r_;
 }
 
 // partial exponential Bell polynomials
@@ -408,6 +554,36 @@ pow_lrule
             pow_lrule (dn - dp, _x, i - 1, dk, id, (*f));
     }
     return r_;
+  } else {
+    return 0.;
+  }
+}
+
+// real pow Leibniz rule
+// =====================
+// \parial_n [f^(k)(x)]^a =
+// a C_{n-a, n} \sum_{p=0}^n (-1)^p C_{n,p} [f^(k)]^{a-p} \partial_{n} [f^(k)(x)]^{p} / (a - p)
+double
+real_pow_lrule
+(
+  int dn, double _x,
+  double a, int dk,
+  int id [],
+  double (*f) (int, double, int *)
+)
+{
+  if (a == 0. && dn != 0) {
+    return 0.;
+  } else if (dn == 0) {
+    return pow ((*f) (dk, _x, id), a);
+  } else if (dn > 0) {
+    int dp; double r_ = 0;
+    for (dp = 0; dp <= dn; dp++) {
+      r_ += pow(-1., dp) * binomial_coefficient (dn, dp) / (a - dp) *
+            pow((*f) (dk, _x, id), a - dp) *
+            pow_lrule (dn, _x, dp, dk, id, (*f));
+    }
+    return a * generalized_binomial_coefficient (dn-a, dn) * r_;
   } else {
     return 0.;
   }
@@ -955,21 +1131,7 @@ abs_b_over_a (int dn, double _x, int id [])
 double
 b_over_a_pow5over2 (int dn, double _x, int id []) // take absolute value
 {
-    // return realpow_lrule (dn, _x, 5./2., 0, id, abs_b_over_a); // too time consuming
-    if (dn == 0) {
-        return pow(abs_b_over_a(0, _x, id), 5./2.);
-    } else if (dn == 1) {
-        return 5./2. * abs_b_over_a(1, _x, id) * pow(abs_b_over_a(0, _x, id), 3./2.);
-    } else if (dn == 2) {
-        return 5./2. * abs_b_over_a(2, _x, id) * pow(abs_b_over_a(0, _x, id), 3./2.)
-        + 5./2. * 3./2. * pow(abs_b_over_a(1, _x, id), 2) * pow(abs_b_over_a(0, _x, id), 1./2.);
-    } else if (dn == 3) {
-        return 5./2. * abs_b_over_a(3, _x, id) * pow(abs_b_over_a(0, _x, id), 3./2.)
-        + 3. * 5./2. * 3./2. * abs_b_over_a(2, _x, id) * abs_b_over_a(1, _x, id) * pow(abs_b_over_a(0, _x, id), 1./2.)
-        + 5./2. * 3./2. * 1./2. * pow(abs_b_over_a(1, _x, id), 3) / pow(abs_b_over_a(0, _x, id), 1./2.);
-    } else {
-        return 0.;
-    }
+    return real_pow_lrule (dn, _x, 5./2., 0, id, abs_b_over_a);
 }
 
 // \partial_n [|eta_x / b_x|^2]
@@ -1179,12 +1341,6 @@ c_functional (double _x, int id [])
 // ---------------------------------------------------------------------------
 // interpolation of parameters (cf. gsl_multiroots)
 // ---------------------------------------------------------------------------
-struct rparams {
-    double *X;
-    double *F;
-    double F_UFG;
-};
-
 int
 beta_fit (const gsl_vector * x, void *params, gsl_vector * f)
 {
@@ -1380,129 +1536,6 @@ void print_interpolation_parameters (gsl_multiroot_fsolver *s)
     printf("\t b3 = %+lf;\n", (gsl_vector_get (s->x, 5)));
     printf("\t c  = %+lf;\n", (gsl_vector_get (s->x, 6)));
     printf("\n");
-}
-// ---------------------------------------------------------------------------
-// ###########################################################################
-
-
-// ---------------------------------------------------------------------------
-
-
-// ###########################################################################
-// ---------------------------------------------------------------------------
-// main interpolation (padé[4/4]) routine of sldae functional
-// ---------------------------------------------------------------------------
-int main() {
-    
-    int id[2] = {0,0}; // choose sldae functional
-    // double _x = 1.000;
-    // print_sldae_parameters (_x, id); // print sldae parameters at _x
-    
-    printf(" ###########################################\n");
-    printf("          --   SLDAE DEV TOOL   --          \n");
-    printf(" ###########################################\n\n");
-    printf(" padé[4/4] interpolation of sldae parameters\n");
-    printf(" p = {beta, inverse_gamma, B, C} [x = |akF|]\n\n");
-    printf("    p       a1 x + a2 x^2 + a3 x^3 + c x^4  \n");
-    printf("  ----- = ----------------------------------\n");
-    printf("  p_ufg   1 + b1 x + b2 x^2 + b3 x^3 + c x^4\n\n");
-
-
-    // initialization of interpolation routine
-    const gsl_multiroot_fsolver_type *T = gsl_multiroot_fsolver_hybrids;
-    gsl_multiroot_fsolver *s = gsl_multiroot_fsolver_alloc (T, 7);
-    
-    // interpolation points (7 requiered)
-    double X[7] = {0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0};
-    double F_beta[7] = {
-        beta_parameter(0, X[0], id),
-        beta_parameter(0, X[1], id),
-        beta_parameter(0, X[2], id),
-        beta_parameter(0, X[3], id),
-        beta_parameter(0, X[4], id),
-        beta_parameter(0, X[5], id),
-        beta_parameter(0, X[6], id)
-    };
-    double F_inverse_gamma[7] = {
-        inverse_gamma_parameter(0, X[0], id),
-        inverse_gamma_parameter(0, X[1], id),
-        inverse_gamma_parameter(0, X[2], id),
-        inverse_gamma_parameter(0, X[3], id),
-        inverse_gamma_parameter(0, X[4], id),
-        inverse_gamma_parameter(0, X[5], id),
-        inverse_gamma_parameter(0, X[6], id)
-    };
-    double F_bf[7] = {
-        b_functional(X[0], id),
-        b_functional(X[1], id),
-        b_functional(X[2], id),
-        b_functional(X[3], id),
-        b_functional(X[4], id),
-        b_functional(X[5], id),
-        b_functional(X[6], id)
-    };
-    double F_cf[7] = {
-        c_functional(X[0], id),
-        c_functional(X[1], id),
-        c_functional(X[2], id),
-        c_functional(X[3], id),
-        c_functional(X[4], id),
-        c_functional(X[5], id),
-        c_functional(X[6], id)
-    };
-    double beta_ufg = beta_parameter(0, 1e9, id);
-    double inverse_gamma_ufg = inverse_gamma_parameter(0, 1e9, id);
-    double bf_ufg = b_functional(1e9, id);
-    double cf_ufg = c_functional(1e9, id);
-    struct rparams p_beta = {X, F_beta, beta_ufg};
-    struct rparams p_inverse_gamma = {X, F_inverse_gamma, inverse_gamma_ufg};
-    struct rparams p_bf = {X, F_bf, bf_ufg};
-    struct rparams p_cf = {X, F_cf, cf_ufg};
-
-    // initialization of the solution
-    gsl_vector *x = gsl_vector_alloc (7);
-    gsl_vector_set (x, 0, 1);
-    gsl_vector_set (x, 1, 1);
-    gsl_vector_set (x, 2, 1);
-    gsl_vector_set (x, 3, 1);
-    gsl_vector_set (x, 4, 1);
-    gsl_vector_set (x, 5, 1);
-    gsl_vector_set (x, 6, 1);
-        
-    // interpolation of beta_parameters
-    gsl_multiroot_function beta = {&beta_fit, 7, &p_beta};
-    gsl_multiroot_fsolver_set (s, &beta, x);
-    printf("                    * * *                   \n");
-    printf ("\n beta interpolation\n beta_ufg = %+lf\n", beta_ufg);
-    print_interpolation_parameters (s);
-    
-    // interpolation of b_functional
-    gsl_multiroot_function bf = {&b_functional_fit, 7, &p_bf};
-    gsl_multiroot_fsolver_set (s, &bf, x);
-    printf("                    * * *                   \n");
-    printf ("\n b_functional interpolation\n b_functional_ufg = %+lf\n", bf_ufg);
-    print_interpolation_parameters (s);
-
-    // interpolation of inverse_gamma_parameters
-    gsl_multiroot_function inverse_gamma = {&inverse_gamma_fit, 7, &p_inverse_gamma};
-    gsl_multiroot_fsolver_set (s, &inverse_gamma, x);
-    printf("                    * * *                   \n");
-    printf ("\n inverse_gamma interpolation\n inverse_gamma_ufg = %+lf\n", inverse_gamma_ufg);
-    print_interpolation_parameters (s);
-
-    // interpolation of c_functional
-    gsl_multiroot_function cf = {&c_functional_fit, 7, &p_cf};
-    gsl_multiroot_fsolver_set (s, &cf, x);
-    printf("                    * * *                   \n");
-    printf ("\n c_functional interpolation\n c_functional_ufg = %+lf\n", cf_ufg);
-    print_interpolation_parameters (s);
-        
-    // reset memory of solver
-    gsl_multiroot_fsolver_free (s);
-    gsl_vector_free (x);
-    printf(" ###########################################\n");
-
-  return 0;
 }
 // ---------------------------------------------------------------------------
 // ###########################################################################
